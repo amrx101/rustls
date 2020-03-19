@@ -445,6 +445,7 @@ impl hs::State for ExpectServerDone {
     fn handle(self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
         let mut st = *self;
         st.handshake.transcript.add_message(&m);
+        println!("DDDDDDDDDDDDDDDDD");
 
         debug!("Server cert is {:?}", st.server_cert.cert_chain);
         debug!("Server DNS name is {:?}", st.handshake.dns_name);

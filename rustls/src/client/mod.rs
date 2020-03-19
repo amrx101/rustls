@@ -747,3 +747,200 @@ impl io::Write for ClientSession {
         Ok(())
     }
 }
+
+
+#[derive(Clone)]
+pub struct PkcsClientConfig {
+    /// List of ciphersuites, in preference order.
+    pub ciphersuites: Vec<&'static SupportedCipherSuite>,
+
+    /// Collection of root certificates.
+    pub root_store: anchors::RootCertStore,
+
+    /// Which ALPN protocols we include in our client hello.
+    /// If empty, no ALPN extension is sent.
+    pub alpn_protocols: Vec<Vec<u8>>,
+
+    /// How we store session data or tickets.
+    pub session_persistence: Arc<dyn StoresClientSessions>,
+
+    /// Our MTU.  If None, we don't limit TLS message sizes.
+    pub mtu: Option<usize>,
+
+    /// How to decide what client auth certificate/keys to use.
+    pub client_auth_cert_resolver: Arc<dyn ResolvesClientCert>,
+
+    /// Whether to support RFC5077 tickets.  You must provide a working
+    /// `session_persistence` member for this to have any meaningful
+    /// effect.
+    ///
+    /// The default is true.
+    pub enable_tickets: bool,
+
+    /// Supported versions, in no particular order.  The default
+    /// is all supported versions.
+    pub versions: Vec<ProtocolVersion>,
+
+    /// Collection of certificate transparency logs.
+    /// If this collection is empty, then certificate transparency
+    /// checking is disabled.
+    pub ct_logs: Option<&'static [&'static sct::Log<'static>]>,
+
+    /// Whether to send the Server Name Indication (SNI) extension
+    /// during the client handshake.
+    ///
+    /// The default is true.
+    pub enable_sni: bool,
+
+    /// How to verify the server certificate chain.
+    verifier: Arc<dyn verify::ServerCertVerifier>,
+
+    /// How to output key material for debugging.  The default
+    /// does nothing.
+    pub key_log: Arc<dyn KeyLog>,
+
+    /// Whether to send data on the first flight ("early data") in
+    /// TLS 1.3 handshakes.
+    ///
+    /// The default is false.
+    pub enable_early_data: bool,
+
+    /// slot_id of the HSM
+    pub slot_id: i32,
+
+    pub lib: Option<String>,
+
+    /// user pin to access HSM slot
+    pub user_pin: Option<String>,
+
+}
+
+impl Default for PkcsClientConfig {
+    fn default() -> Self { Self::new() }
+}
+
+impl PkcsClientConfig {
+    /// Make a `PkcsClientConfig` with a default set of ciphersuites,
+    /// no root certificates, no ALPN protocols, and no client auth.
+    ///
+    /// The default session persistence provider stores up to 32
+    /// items in memory.
+    pub fn new() -> PkcsClientConfig {
+        PkcsClientConfig {
+            ciphersuites: ALL_CIPHERSUITES.to_vec(),
+            root_store: anchors::RootCertStore::empty(),
+            alpn_protocols: Vec::new(),
+            session_persistence: handy::ClientSessionMemoryCache::new(32),
+            mtu: None,
+            client_auth_cert_resolver: Arc::new(handy::FailResolveClientCert {}),
+            enable_tickets: true,
+            versions: vec![ProtocolVersion::TLSv1_3, ProtocolVersion::TLSv1_2],
+            ct_logs: None,
+            enable_sni: true,
+            verifier: Arc::new(verify::WebPKIVerifier::new()),
+            key_log: Arc::new(NoKeyLog {}),
+            enable_early_data: false,
+            slot_id: 1,
+            lib: None,
+            user_pin: None,
+        }
+    }
+
+    #[doc(hidden)]
+    /// We support a given TLS version if it's quoted in the configured
+    /// versions *and* at least one ciphersuite for this version is
+    /// also configured.
+    pub fn supports_version(&self, v: ProtocolVersion) -> bool {
+        self.versions.contains(&v) && self.ciphersuites.iter().any(|cs| cs.usable_for_version(v))
+    }
+
+    #[doc(hidden)]
+    pub fn get_verifier(&self) -> &dyn verify::ServerCertVerifier {
+        self.verifier.as_ref()
+    }
+
+    /// Set the ALPN protocol list to the given protocol names.
+    /// Overwrites any existing configured protocols.
+    /// The first element in the `protocols` list is the most
+    /// preferred, the last is the least preferred.
+    pub fn set_protocols(&mut self, protocols: &[Vec<u8>]) {
+        self.alpn_protocols.clear();
+        self.alpn_protocols.extend_from_slice(protocols);
+    }
+
+    /// Sets persistence layer to `persist`.
+    pub fn set_persistence(&mut self, persist: Arc<dyn StoresClientSessions>) {
+        self.session_persistence = persist;
+    }
+
+    /// Sets MTU to `mtu`.  If None, the default is used.
+    /// If Some(x) then x must be greater than 5 bytes.
+    pub fn set_mtu(&mut self, mtu: &Option<usize>) {
+        // Internally our MTU relates to fragment size, and does
+        // not include the TLS header overhead.
+        //
+        // Externally the MTU is the whole packet size.  The difference
+        // is PACKET_OVERHEAD.
+        if let Some(x) = *mtu {
+            use crate::msgs::fragmenter;
+            debug_assert!(x > fragmenter::PACKET_OVERHEAD);
+            self.mtu = Some(x - fragmenter::PACKET_OVERHEAD);
+        } else {
+            self.mtu = None;
+        }
+    }
+
+    /// Sets a single client authentication certificate and private key.
+    /// This is blindly used for all servers that ask for client auth.
+    ///
+    /// `cert_chain` is a vector of DER-encoded certificates,
+    /// `key_der` is a DER-encoded RSA or ECDSA private key.
+    /// This needs to change to accomodate for pkcs.
+    /// Modify this to accept the return a pkcs11 signer
+    // pub fn set_single_client_cert(&mut self,
+    //                               cert_chain: Vec<key::Certificate>,
+    //                               key_der: key::PrivateKey) -> Result<(), TLSError> {
+    //     let resolver = handy::AlwaysResolvesClientCert::new(cert_chain, &key_der)?;
+    //     self.client_auth_cert_resolver = Arc::new(resolver);
+    //     Ok(())
+    // }
+
+    // /// Set a PKCS11 signer here
+    // pub fn set_single_client_cert(&mut self) -> Result<(), TLSError> {
+    //     let resolver = handy::PkcsEngineResolvesClientCert::new()?;
+    //     self.client_auth_cert_resolver = Arc::new(resolver);
+    //     Ok(())
+        
+    // }
+
+    /// Access configuration options whose use is dangerous and requires
+    /// extra care.
+    #[cfg(feature = "dangerous_configuration")]
+    pub fn dangerous(&mut self) -> danger::DangerousClientConfig {
+        danger::DangerousClientConfig { cfg: self }
+    }
+
+    pub fn set_slotid(&mut self, slot_id: i32) {
+        self.slot_id = slot_id;
+    }
+
+    pub fn get_slot(&mut self) -> i32{
+        self.slot_id
+    }
+
+    pub fn set_lib(&mut self, lib: String) {
+        self.lib = Some(lib);
+    }
+
+    pub fn get_lib(&self) -> Option<String> {
+        self.lib.clone()
+    }
+
+    pub fn set_user_pin(&mut self, user_pin: String){
+        self.user_pin = Some(user_pin)
+    }
+
+    pub fn get_user_pin(&self) -> Option<String> {
+        self.user_pin.clone()
+    }
+}

@@ -103,6 +103,22 @@ impl client::ResolvesClientCert for AlwaysResolvesClientCert {
     }
 }
 
+pub struct PkcsEngineResolvesClientCert(sign::CertifiedKey);
+
+
+impl client::ResolvesClientCert for PkcsEngineResolvesClientCert {
+    fn resolve(&self,
+            _acceptable_issuers: &[&[u8]],
+            _sigschemes: &[SignatureScheme])
+            -> Option<sign::CertifiedKey> {
+        Some(self.0.clone())
+    }
+
+    fn has_certs(&self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

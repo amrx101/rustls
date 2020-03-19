@@ -577,6 +577,7 @@ impl hs::State for ExpectCertificateVerify {
 
     fn handle(mut self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
         let cert_verify = extract_handshake!(m, HandshakePayload::CertificateVerify).unwrap();
+        println!("ALLLL");
 
         debug!("Server cert is {:?}", self.server_cert.cert_chain);
 
@@ -871,6 +872,7 @@ impl hs::State for ExpectFinished {
 
         /* Send our authentication/finished messages.  These are still encrypted
          * with our handshake keys. */
+        println!("st.client_uth{:?}", st.client_auth.is_some());
         if st.client_auth.is_some() {
             emit_certificate_tls13(&mut st.handshake,
                                    st.client_auth.as_mut().unwrap(),

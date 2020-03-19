@@ -2,11 +2,12 @@ use crate::msgs::enums::{SignatureAlgorithm, SignatureScheme};
 use crate::key;
 use crate::error::TLSError;
 
-use ring::{self, signature::{self, EcdsaKeyPair, RsaKeyPair}};
+use ring::{self, signature::{self, EcdsaKeyPair, RsaKeyPair}, digest};
 use webpki;
 
 use std::sync::Arc;
 use std::mem;
+use libloading as lib;
 
 /// An abstract signing key.
 pub trait SigningKey : Send + Sync {
@@ -297,6 +298,233 @@ impl Signer for SingleSchemeSigner {
     }
 }
 
+/// Create a pkcs_signer
+/// Unlike the signer which relies on ring to sign
+/// the requirements are different here.
+/// A HSM is not going to provide private key and hence we cannot really use
+/// the type of private to infer the signing signature type.
+/// A HSM signer would need slot_id and user_pin as well to communicate with the
+/// HSM module. This info about slot_id and user_pin must percolate to the
+/// signer from PkcsClientConfig.
+pub fn pkcs_supported_signer(signature: String, lib_path: String, slot_id: String, user_pin: String)-> Result<Box<dyn SigningKey>, ()>{
+    // let lib_path = lib::Library::new(lib_path.clone()).unwrap();
+    if signature == "RSA" {
+        let pkcs_signer = PkcsRSASigningLib::new(lib_path, slot_id, user_pin);
+        if let Ok(signer) = pkcs_signer {
+            return Ok(Box::new(signer));
+        }
+        return Err(());
+    }
+
+    if signature == "ECDSA_P256"{
+        let pkcs_signer = PkcsSignleSchemeSigningLib::new(
+            lib_path, SignatureScheme::ECDSA_NISTP256_SHA256,
+            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            slot_id,
+            user_pin,
+        );
+        if let Ok(signer) = pkcs_signer {
+            return Ok(Box::new(signer));
+        }
+        return Err(());
+    }
+
+    if signature == "ECDSA_P384" {
+        let pkcs_signer = PkcsSignleSchemeSigningLib::new(
+            lib_path,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            &signature::ECDSA_P384_SHA384_ASN1_SIGNING,
+            slot_id,
+            user_pin,
+        );
+        if let Ok(signer) = pkcs_signer{
+            return Ok(Box::new(signer));
+        }
+    }
+    Err(())
+}
+
+/// PkcsRSASigner Lib, an equivalent of RSASigningKey
+pub struct RSASigningLib {
+    key: Arc<libloading::Library>,
+}
+
+/// PkcsRSASigner Lib, an equivalent of RSASigningKey
+pub struct PkcsRSASigningLib {
+    lib: Arc<libloading::Library>,
+    slot_id: String,
+    user_pin: String,
+}
+
+
+impl PkcsRSASigningLib {
+    /// Create new instance of PkcsRSASigningLib
+    pub fn new(lib_path: String, slot_id: String, user_pin: String)-> Result<PkcsRSASigningLib, ()> {
+        let lib = lib::Library::new(lib_path.clone()).unwrap();
+        Ok(PkcsRSASigningLib{lib: Arc::new(lib), slot_id, user_pin})
+    }
+}
+
+impl SigningKey for PkcsRSASigningLib {
+    fn choose_scheme(&self, offered: &[SignatureScheme]) -> Option<Box<dyn Signer>> {
+        ALL_RSA_SCHEMES
+            .iter()
+            .filter(|scheme| offered.contains(scheme))
+            .nth(0)
+            .map(|scheme| PkcsRSASigner::new(self.lib.clone(), *scheme, self.slot_id.clone(), self.user_pin.clone()))
+    }
+
+    fn algorithm(&self) -> SignatureAlgorithm {
+        SignatureAlgorithm::RSA
+    }
+}
+
+/// A PkcsRSASigner, will call C instead of ring
+struct PkcsRSASigner {
+    lib: Arc<libloading::Library>,
+    scheme: SignatureScheme,
+    encoding: &'static dyn signature::RsaEncoding,
+    slot_id: String,
+    user_pin: String,
+}
+
+impl PkcsRSASigner {
+    fn new(lib: Arc<libloading::Library>, scheme: SignatureScheme, slot_id: String, user_pin: String) -> Box<dyn Signer> {
+        let encoding: &dyn signature::RsaEncoding = match scheme {
+            SignatureScheme::RSA_PKCS1_SHA256 => &signature::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384 => &signature::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512 => &signature::RSA_PKCS1_SHA512,
+            SignatureScheme::RSA_PSS_SHA256 => &signature::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384 => &signature::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512 => &signature::RSA_PSS_SHA512,
+            _ => unreachable!(),
+        };
+        Box::new(PkcsRSASigner{lib, scheme, encoding, slot_id, user_pin})
+    }
+}
+
+impl Signer for PkcsRSASigner {
+    fn sign(&self, message: &[u8])-> Result<Vec<u8>, TLSError>{
+        // TODO: Call C here
+        // Need slot_id & pin
+        let mut vec = vec![1, 2, 3];
+        Ok(vec)
+
+    }
+    fn get_scheme(&self) -> SignatureScheme{
+        self.scheme
+    }
+}
+
+/// PkcsSingleSchemeSigningLib
+struct PkcsSignleSchemeSigningLib{
+    lib: Arc<libloading::Library>,
+    sigalg: &'static signature::EcdsaSigningAlgorithm,
+    scheme: SignatureScheme,
+    slot_id: String,
+    user_pin: String,
+}
+
+impl PkcsSignleSchemeSigningLib {
+    pub fn new(
+        lib_path: String,
+        scheme: SignatureScheme,
+        sigalg: &'static signature::EcdsaSigningAlgorithm,
+        slot_id: String, user_pin: String)-> Result<PkcsSignleSchemeSigningLib, ()>{
+            let lib = lib::Library::new(lib_path.clone()).unwrap();
+            Ok(PkcsSignleSchemeSigningLib{lib: Arc::new(lib), sigalg, scheme, slot_id, user_pin})
+    }
+}
+
+impl SigningKey for PkcsSignleSchemeSigningLib {
+    fn choose_scheme(&self, offered: &[SignatureScheme]) -> Option<Box<dyn Signer>> {
+        if offered.contains(&self.scheme) {
+            let signer = PkcsSingleSchemeSigner::new(self.lib.clone(), self.scheme, self.sigalg, self.slot_id.clone(), self.user_pin.clone());
+            Some(signer)
+        } else {
+            None
+        }
+    }
+
+    fn algorithm(&self) -> SignatureAlgorithm {
+        use crate::msgs::handshake::DecomposedSignatureScheme;
+        self.scheme.sign()
+    }
+}
+
+
+/// PkcsSigngleSchemeSigner
+struct PkcsSingleSchemeSigner {
+    lib: Arc<libloading::Library>,
+    scheme: SignatureScheme,
+    sigalg: &'static signature::EcdsaSigningAlgorithm,
+    slot_id: String,
+    user_pin: String,
+}
+
+impl PkcsSingleSchemeSigner {
+    /// create one
+    pub fn new(lib: Arc<libloading::Library>,
+                scheme: SignatureScheme,
+                sigalg: &'static signature::EcdsaSigningAlgorithm,
+                slot_id: String, user_pin:String) -> Box<dyn Signer>{
+        
+        Box::new(PkcsSingleSchemeSigner{lib, scheme, sigalg, slot_id, user_pin})
+    }
+}
+
+impl Signer for  PkcsSingleSchemeSigner {
+    fn sign(&self, message: &[u8])-> Result<Vec<u8>, TLSError>{
+        let mut vec = vec![1, 2, 3];
+
+        // TODO: Cant hardcode algo. Delegate to lib.
+        let d = digest::digest(&digest::SHA256, message);
+        let mut d_val: &[u8] = d.as_ref();
+        let d_len = d_val.len();
+        let mut signature: Vec<u8> = Vec::with_capacity(64);
+        let p_data = d_val.as_mut_ptr();
+        let p_signature = signature.as_mut_ptr();
+
+
+        // fn sign(data, data_len, signature, signature_len, slot_id, user_pin)
+        // data_types:
+            // data: mutable raw_pointer_to_a_vec<u8>
+            // data_len: u_size
+            // signature: mutable raw_pointer_to_a_vec<u8>
+            // signature_len: mutable raw pointer to usize
+            // slot_id: raw_pointer to vec<u8>
+            // user_pin: raw_poinyer to vec<u8>
+            
+            // fn(data: *mut u8, data_len: u_size, signature: *mut u8, signature_len: *mut u_size, slot_id: *mut u8, user_pin: *mut u8) -> CK_RV;
+
+
+
+
+        // let mut data = data.clone();
+        // let mut signatureLen: CK_ULONG = 0;
+        // match (self.C_Sign)(session, data.as_mut_ptr(), data.len() as CK_ULONG, ptr::null_mut(), &mut signatureLen) {
+        //   CKR_OK => {
+        //     let mut signature: Vec<CK_BYTE> = Vec::with_capacity(signatureLen as usize);
+        //     match (self.C_Sign)(session, data.as_mut_ptr(), data.len() as CK_ULONG, signature.as_mut_ptr(), &mut signatureLen) {
+        //       CKR_OK => {
+        //         unsafe {
+        //           signature.set_len(signatureLen as usize);
+        //         }
+        //         Ok(signature)
+        //       },
+
+
+        
+        Ok(vec)
+
+    }
+    fn get_scheme(&self) -> SignatureScheme{
+        self.scheme
+    }
+
+}
+
+
 /// The set of schemes we support for signatures and
 /// that are allowed for TLS1.3.
 pub fn supported_sign_tls13() -> &'static [SignatureScheme] {
@@ -310,3 +538,18 @@ pub fn supported_sign_tls13() -> &'static [SignatureScheme] {
 
     ]
 }
+
+
+// RSA_PKCS1_SHA1 => 0x0201,   //513
+// ECDSA_SHA1_Legacy => 0x0203,   //515
+// RSA_PKCS1_SHA256 => 0x0401,     //1025
+// ECDSA_NISTP256_SHA256 => 0x0403,  //1027
+// RSA_PKCS1_SHA384 => 0x0501,     //1281
+// ECDSA_NISTP384_SHA384 => 0x0503, //1282
+// RSA_PKCS1_SHA512 => 0x0601,      // 1537
+// ECDSA_NISTP521_SHA512 => 0x0603,  //1539
+// RSA_PSS_SHA256 => 0x0804,   // 2052
+// RSA_PSS_SHA384 => 0x0805,    //2053
+// RSA_PSS_SHA512 => 0x0806,    // 2054
+// ED25519 => 0x0807,         //2055
+// ED448 => 0x0808         //2066
