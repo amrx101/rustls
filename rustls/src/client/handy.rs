@@ -105,6 +105,19 @@ impl client::ResolvesClientCert for AlwaysResolvesClientCert {
 
 pub struct PkcsEngineResolvesClientCert(sign::CertifiedKey);
 
+impl PkcsEngineResolvesClientCert {
+    pub fn new(chain: Vec<key::Certificate>,
+                signature: String,
+                lib_path: String,
+                slot_id: String,
+                user_pin: String,) -> Result<PkcsEngineResolvesClientCert, TLSError>{
+        let key = sign::pkcs_supported_signer(signature, lib_path, slot_id, user_pin)
+            .map_err(|_| TLSError::General("invalid private key".into()))?;
+    
+        Ok(PkcsEngineResolvesClientCert(sign::CertifiedKey::new(chain, Arc::new(key))))
+    }
+}
+
 
 impl client::ResolvesClientCert for PkcsEngineResolvesClientCert {
     fn resolve(&self,

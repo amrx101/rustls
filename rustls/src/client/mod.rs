@@ -808,10 +808,10 @@ pub struct PkcsClientConfig {
     /// slot_id of the HSM
     pub slot_id: i32,
 
-    pub lib: Option<String>,
+    pub lib: String,
 
     /// user pin to access HSM slot
-    pub user_pin: Option<String>,
+    pub user_pin: String,
 
 }
 
@@ -841,8 +841,8 @@ impl PkcsClientConfig {
             key_log: Arc::new(NoKeyLog {}),
             enable_early_data: false,
             slot_id: 1,
-            lib: None,
-            user_pin: None,
+            lib: "lib_path".to_string(),
+            user_pin: "pin".to_string(),
         }
     }
 
@@ -890,28 +890,13 @@ impl PkcsClientConfig {
         }
     }
 
-    /// Sets a single client authentication certificate and private key.
-    /// This is blindly used for all servers that ask for client auth.
-    ///
-    /// `cert_chain` is a vector of DER-encoded certificates,
-    /// `key_der` is a DER-encoded RSA or ECDSA private key.
-    /// This needs to change to accomodate for pkcs.
-    /// Modify this to accept the return a pkcs11 signer
-    // pub fn set_single_client_cert(&mut self,
-    //                               cert_chain: Vec<key::Certificate>,
-    //                               key_der: key::PrivateKey) -> Result<(), TLSError> {
-    //     let resolver = handy::AlwaysResolvesClientCert::new(cert_chain, &key_der)?;
-    //     self.client_auth_cert_resolver = Arc::new(resolver);
-    //     Ok(())
-    // }
-
-    // /// Set a PKCS11 signer here
-    // pub fn set_single_client_cert(&mut self) -> Result<(), TLSError> {
-    //     let resolver = handy::PkcsEngineResolvesClientCert::new()?;
-    //     self.client_auth_cert_resolver = Arc::new(resolver);
-    //     Ok(())
+    /// Set a PKCS11 signer here. `cert_chain` is a vector of DER-encoded certificates
+    /// HSM slot_id and user_passwords are used
+    pub fn set_single_client_cert(&mut self, cert_chain: Vec<key::Certificate>) -> Result<(), TLSError> {
+        let resolver = handy::PkcsEngineResolvesClientCert::new(cert_chain, "RSA".to_string(), self.get_lib(), self.get_slot().to_string(), self.get_user_pin())?;
+        Ok(())
         
-    // }
+    }
 
     /// Access configuration options whose use is dangerous and requires
     /// extra care.
@@ -929,18 +914,18 @@ impl PkcsClientConfig {
     }
 
     pub fn set_lib(&mut self, lib: String) {
-        self.lib = Some(lib);
+        self.lib = lib;
     }
 
-    pub fn get_lib(&self) -> Option<String> {
+    pub fn get_lib(&self) -> String {
         self.lib.clone()
     }
 
     pub fn set_user_pin(&mut self, user_pin: String){
-        self.user_pin = Some(user_pin)
+        self.user_pin = user_pin
     }
 
-    pub fn get_user_pin(&self) -> Option<String> {
+    pub fn get_user_pin(&self) -> String {
         self.user_pin.clone()
     }
 }
