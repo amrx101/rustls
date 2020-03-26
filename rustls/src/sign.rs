@@ -454,6 +454,8 @@ impl SigningKey for PkcsSignleSchemeSigningLib {
 
 
 /// PkcsSigngleSchemeSigner
+/// A signer which delegates the signing to an HSM
+/// using a linked library.
 struct PkcsSingleSchemeSigner {
     lib: Arc<libloading::Library>,
     scheme: SignatureScheme,
@@ -482,7 +484,8 @@ impl Signer for  PkcsSingleSchemeSigner {
         let mut d_val: &[u8] = d.as_ref();
         let d_len = d_val.len();
         let mut signature: Vec<u8> = Vec::with_capacity(64);
-        let p_data = d_val.as_mut_ptr();
+        let mut test = d_val.to_vec();
+        let p_data = test.as_mut_ptr();
         let p_signature = signature.as_mut_ptr();
 
 
