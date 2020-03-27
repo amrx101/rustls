@@ -1,6 +1,7 @@
 use crate::msgs::enums::{SignatureAlgorithm, SignatureScheme};
 use crate::key;
 use crate::error::TLSError;
+use crate::pkcs;
 
 use ring::{self, signature::{self, EcdsaKeyPair, RsaKeyPair}, digest};
 use webpki;

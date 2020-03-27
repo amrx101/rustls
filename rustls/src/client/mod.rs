@@ -748,7 +748,8 @@ impl io::Write for ClientSession {
     }
 }
 
-
+/// Common configuration for all connections
+/// made to an HSM
 #[derive(Clone)]
 pub struct PkcsClientConfig {
     /// List of ciphersuites, in preference order.
@@ -808,6 +809,7 @@ pub struct PkcsClientConfig {
     /// slot_id of the HSM
     pub slot_id: i32,
 
+    /// path of so file
     pub lib: String,
 
     /// user pin to access HSM slot
@@ -905,26 +907,33 @@ impl PkcsClientConfig {
         danger::DangerousClientConfig { cfg: self }
     }
 
+    /// set slot id of the HSM where crypto mechanism takes place.
     pub fn set_slotid(&mut self, slot_id: i32) {
         self.slot_id = slot_id;
     }
 
+    /// return slot_id
     pub fn get_slot(&mut self) -> i32{
         self.slot_id
     }
 
+    /// Set path of so file
     pub fn set_lib(&mut self, lib: String) {
         self.lib = lib;
     }
 
+    /// Get path of so file.
     pub fn get_lib(&self) -> String {
         self.lib.clone()
     }
 
+    /// Set user pin. This is required to access cryptopki
+    /// objects, sessions etc
     pub fn set_user_pin(&mut self, user_pin: String){
         self.user_pin = user_pin
     }
 
+    /// get user pin.
     pub fn get_user_pin(&self) -> String {
         self.user_pin.clone()
     }

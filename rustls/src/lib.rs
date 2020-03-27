@@ -232,6 +232,7 @@ mod pemfile;
 mod x509;
 mod anchors;
 mod verify;
+mod pkcs;
 #[cfg(test)]
 mod verifybench;
 mod handshake;
@@ -267,7 +268,7 @@ pub use crate::stream::{Stream, StreamOwned};
 pub use crate::anchors::{DistinguishedNames, RootCertStore};
 pub use crate::client::StoresClientSessions;
 pub use crate::client::handy::{NoClientSessionStorage, ClientSessionMemoryCache};
-pub use crate::client::{ClientConfig, ClientSession, WriteEarlyData};
+pub use crate::client::{ClientConfig, ClientSession, WriteEarlyData, PkcsClientConfig};
 pub use crate::client::ResolvesClientCert;
 pub use crate::server::StoresServerSessions;
 pub use crate::server::handy::{NoServerSessionStorage, ServerSessionMemoryCache};
@@ -281,6 +282,7 @@ pub use crate::suites::{ALL_CIPHERSUITES, BulkAlgorithm, SupportedCipherSuite};
 pub use crate::key::{Certificate, PrivateKey};
 pub use crate::keylog::{KeyLog, NoKeyLog, KeyLogFile};
 pub use crate::vecbuf::{WriteV, WriteVAdapter};
+pub use crate::pkcs::Pkcs;
 
 /// Message signing interfaces and implementations.
 pub mod sign;
